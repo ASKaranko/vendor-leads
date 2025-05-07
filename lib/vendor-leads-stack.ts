@@ -45,6 +45,18 @@ export class VendorLeadsStack extends cdk.Stack {
     cdk.Tags.of(this).add('Project', 'vendor-leads');
     cdk.Tags.of(this).add('Environment', stage);
 
+    const routerFnLogGroup = new LogGroup(this, 'PostRouterLogGroup', {
+      logGroupName: `/aws/lambda/${stage}-vendor-leads-post-router`,
+      retention: RetentionDays.INFINITE,
+      removalPolicy: cdk.RemovalPolicy.DESTROY
+    });
+
+    const ddbWriterFnLogGroup = new LogGroup(this, 'DDBWriterLogGroup', {
+      logGroupName: `/aws/lambda/${stage}-vendor-leads-ddb-writer`,
+      retention: RetentionDays.INFINITE,
+      removalPolicy: cdk.RemovalPolicy.DESTROY
+    });
+
     const postRouterLambda = new NodejsFunction(this, 'VendorLeadsPostRouter', {
       functionName: `${stage}-vendor-leads-post-router`,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -57,7 +69,8 @@ export class VendorLeadsStack extends cdk.Stack {
         SALESFORCE_EVENT_BUS_NAME: salesforceEventBusName,
         SALESFORCE_EVENT_BUS_RULE_SOURCE: salesforceEventRuleSource,
         SALESFORCE_EVENT_BUS_RULE_DETAIL_TYPE: salesforceEventDetailType
-      }
+      },
+      logGroup: routerFnLogGroup
     });
 
     const ddbWriterLambda = new NodejsFunction(this, 'VendorLeadsDDBWriter', {
@@ -67,19 +80,8 @@ export class VendorLeadsStack extends cdk.Stack {
       entry: path.join(__dirname, '../lambda/database/ddb-writer.js'),
       handler: 'handler',
       memorySize: 128,
-      timeout: cdk.Duration.seconds(5)
-    });
-
-    new LogGroup(this, 'PostRouterLogGroup', {
-      logGroupName: `/aws/lambda/${stage}-vendor-leads-post-router`,
-      retention: RetentionDays.INFINITE,
-      removalPolicy: cdk.RemovalPolicy.DESTROY
-    });
-
-    new LogGroup(this, 'DDBWriterLogGroup', {
-      logGroupName: `/aws/lambda/${stage}-vendor-leads-ddb-writer`,
-      retention: RetentionDays.INFINITE,
-      removalPolicy: cdk.RemovalPolicy.DESTROY
+      timeout: cdk.Duration.seconds(5),
+      logGroup: ddbWriterFnLogGroup
     });
 
     const apiGatewayLogGroup = new LogGroup(this, 'ApiGatewayLogGroup', {
