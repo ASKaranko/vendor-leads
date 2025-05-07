@@ -8,7 +8,7 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as path from 'path';
 import * as events from 'aws-cdk-lib/aws-events';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
-import { ApiDestination } from 'aws-cdk-lib/aws-events-targets';
+import { ApiDestination, CloudWatchLogGroup } from 'aws-cdk-lib/aws-events-targets';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { SecretValue } from 'aws-cdk-lib';
 
@@ -24,7 +24,7 @@ export class VendorLeadsStack extends cdk.Stack {
     const stage = props.stage || 'dev';
     const vendorLeadsTable = props.vendorLeadsTable;
 
-    const salesforceEventBusName = 'salesforce-event-bus';
+    const salesforceEventBusName = `${stage}-salesforce-event-bus`;
     const salesforceEventRuleSource = 'vendorleads.upsert';
     const salesforceEventDetailType = 'LeadsReceived';
 
@@ -33,8 +33,8 @@ export class VendorLeadsStack extends cdk.Stack {
     const salesforceRestAPIPath = '/services/apexrest/vendor-api/v1/leads/';
     const salesforceOAuthPath = '/services/oauth2/token';
 
-    const clientIdSSMName = `SalesforceClientId`;
-    const clientSecretSSMName = `SalesforceClientSecret`;
+    const clientIdSSMName = `${stage}/SFClientId`;
+    const clientSecretSSMName = `${stage}/SFClientSecret`;
 
     new cdk.CfnOutput(this, 'Stage', {
       value: stage,
@@ -42,8 +42,8 @@ export class VendorLeadsStack extends cdk.Stack {
     });
 
     //stack level tags
-    cdk.Tags.of(this).add('project', 'vendor-leads');
-    cdk.Tags.of(this).add('stage', stage);
+    cdk.Tags.of(this).add('Project', 'vendor-leads');
+    cdk.Tags.of(this).add('Environment', stage);
 
     const postRouterLambda = new NodejsFunction(this, 'VendorLeadsPostRouter', {
       functionName: `${stage}-vendor-leads-post-router`,
@@ -84,6 +84,12 @@ export class VendorLeadsStack extends cdk.Stack {
 
     const apiGatewayLogGroup = new LogGroup(this, 'ApiGatewayLogGroup', {
       logGroupName: `/aws/apigateway/${stage}-vendor-leads-api`,
+      retention: RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY
+    });
+
+    const eventBusLogGroup = new LogGroup(this, 'EventBusLogGroup', {
+      logGroupName: `/aws/events/${salesforceEventBusName}`,
       retention: RetentionDays.ONE_MONTH,
       removalPolicy: cdk.RemovalPolicy.DESTROY
     });
@@ -183,11 +189,12 @@ export class VendorLeadsStack extends cdk.Stack {
     const eventBus = new events.EventBus(this, 'SalesforceEventBus', {
       eventBusName: salesforceEventBusName,
       description:
-        'This event bus delivers different events to various Salesforce instances (production or sandbox), depending on the integration—such as for the lead store.',  
-        deadLetterQueue: vendorLeadsEventDeadLetterQueue,
+        'This event bus delivers different events to various Salesforce instances (production or sandbox), depending on the integration—such as for the lead store.'
     });
     eventBus.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
-    
+
+    eventBus.grantPutEventsTo(postRouterLambda);
+
     // Configure event bus archive with retention and AWS-owned encryption
     const archiveProps: events.ArchiveProps = {
       archiveName: `${stage}-salesforce-event-bus-archive`,
@@ -196,30 +203,40 @@ export class VendorLeadsStack extends cdk.Stack {
       eventPattern: {
         // Empty pattern to capture all events
       },
-      sourceEventBus: eventBus,
+      sourceEventBus: eventBus
     };
     eventBus.archive('SalesforceEventBusArchive', archiveProps);
+
+    cdk.Tags.of(eventBus).add('Project', 'vendor-leads');
+    cdk.Tags.of(eventBus).add('Environment', stage);
 
     const endpointDomain = stage === 'prod' ? productionDomain : sandboxDomain;
     // Connection with client-credentials OAuth
     const connection = new events.Connection(this, 'SalesforceConnection', {
-      // 2️⃣  wrap them in Authorization.oauth(…)
+      connectionName: `${stage}-salesforce-connection`,
+      description: 'OAuth-client-credentials connection to Salesforce',
       authorization: events.Authorization.oauth({
         authorizationEndpoint: `${endpointDomain}${salesforceOAuthPath}`,
         httpMethod: events.HttpMethod.POST,
-        clientId: SecretValue.secretsManager(`${stage}/${clientIdSSMName}`).unsafeUnwrap(),
-        clientSecret: SecretValue.secretsManager(`${stage}/${clientSecretSSMName}`),
+        clientId: SecretValue.secretsManager(`${clientIdSSMName}`, {
+          jsonField: 'client_id' // Specify the key within the secret
+        }).unsafeUnwrap(),
+        clientSecret: SecretValue.secretsManager(`${clientSecretSSMName}`, {
+          jsonField: 'client_secret'
+        }),
         bodyParameters: {
-          grant_type: events.HttpParameter.fromString('client_credentials'),
+          grant_type: events.HttpParameter.fromString('client_credentials')
         },
-      }),
-      description: 'OAuth-client-credentials connection to Salesforce',
-      // TODO: connectionName, headerParameters, queryStringParameters, etc.
+        headerParameters: {
+          'Content-Type': events.HttpParameter.fromString('application/x-www-form-urlencoded')
+        }
+      })
     });
 
     // API destination (HTTP endpoint)
-
     const dest = new events.ApiDestination(this, 'SalesforceVendorLeadsAPIDest', {
+      apiDestinationName: `${stage}-salesforce-vendor-leads-api-destination`,
+      description: 'API destination for Salesforce vendor leads',
       connection,
       endpoint: `${endpointDomain}${salesforceRestAPIPath}`,
       httpMethod: events.HttpMethod.POST,
@@ -227,15 +244,49 @@ export class VendorLeadsStack extends cdk.Stack {
     });
 
     // Rule that sends matching events to the destination (using custom pattern)
-    new events.Rule(this, 'VendorLeadsUpsertToSalesforce', {
+    const salesforceRule = new events.Rule(this, 'VendorLeadsUpsertToSalesforce', {
       ruleName: `${stage}-vendor-leads-upsert-to-salesforce`,
       description: 'Rule to send vendor leads to Salesforce',
       eventBus,
       eventPattern: {
         source: [salesforceEventRuleSource],
         detailType: [salesforceEventDetailType]
-      },
-      targets: [new ApiDestination(dest)]
+      }
     });
+    salesforceRule.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+    salesforceRule.addTarget(
+      new ApiDestination(dest, {
+        deadLetterQueue: vendorLeadsEventDeadLetterQueue,
+        maxEventAge: cdk.Duration.minutes(15),
+        retryAttempts: 3,
+        queryStringParameters: {
+          vendor: '$.detail.vendor'
+        },
+        event: events.RuleTargetInput.fromEventPath('$.detail.leads')
+      })
+    );
+
+    cdk.Tags.of(salesforceRule).add('Project', 'vendor-leads');
+    cdk.Tags.of(salesforceRule).add('Environment', stage);
+
+    //logging rule
+    const sfEventBusLoggingRule = new events.Rule(this, 'SFEventBusLoggingRule', {
+      ruleName: `${stage}-sf-event-bus-logging-rule`,
+      description: 'Rule to log all events from the Salesforce event bus',
+      eventBus,
+      eventPattern: {
+        account: [cdk.Stack.of(this).account]   // matches all events
+      }
+    });
+    sfEventBusLoggingRule.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+    sfEventBusLoggingRule.addTarget(
+      new CloudWatchLogGroup(eventBusLogGroup, {
+        maxEventAge: cdk.Duration.minutes(15),
+        retryAttempts: 3,
+      })
+    );
+
+    cdk.Tags.of(sfEventBusLoggingRule).add('Project', 'vendor-leads');
+    cdk.Tags.of(sfEventBusLoggingRule).add('Environment', stage);
   }
 }
