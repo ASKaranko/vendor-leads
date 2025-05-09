@@ -15,13 +15,13 @@ export class VendorLeadsStage extends Stage {
 
     // Create the database stack first
     const databaseStack = new VendorLeadsDatabaseStack(this, 'VendorLeadsDatabase', {
-      stage,
+      stage
     });
 
     // Create the main stack, passing the table from the database stack
     new VendorLeadsStack(this, 'VendorLeadsMain', {
       stage,
-      vendorLeadsTable: databaseStack.vendorLeadsTable,
+      vendorLeadsTable: databaseStack.vendorLeadsTable
     });
   }
 }

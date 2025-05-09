@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
-import * as cdk from 'aws-cdk-lib';
+import { App } from 'aws-cdk-lib';
 import { VendorLeadsStage } from '../lib/vendor-leads-stage';
 
-const app = new cdk.App();
+const app = new App();
 
 // Create a stage for each environment
 new VendorLeadsStage(app, 'dev', {

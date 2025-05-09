@@ -130,11 +130,11 @@ async function sendLeadsToEventBridge(vendor, leadsData) {
           {
             EventBusName: process.env.SALESFORCE_EVENT_BUS_NAME,
             Source: process.env.SALESFORCE_EVENT_BUS_RULE_SOURCE,
-            DetailType: process.env.SALESFORCE_EVENT_BUS_RULE_DETAIL_TYPE, 
+            DetailType: process.env.SALESFORCE_EVENT_BUS_RULE_DETAIL_TYPE,
             Detail: JSON.stringify({
               vendor,
               leads: chunk
-            }),
+            })
           }
         ]
       });
@@ -143,7 +143,10 @@ async function sendLeadsToEventBridge(vendor, leadsData) {
       console.log('EventBridge response:', response);
 
       if (response.FailedEntryCount > 0) {
-        console.error('Failed to send some events:', response.Entries.filter(e => e.ErrorCode));
+        console.error(
+          'Failed to send some events:',
+          response.Entries.filter((e) => e.ErrorCode)
+        );
       }
     } catch (error) {
       console.error('Error sending events to EventBridge:', error);

@@ -1,5 +1,8 @@
 import { DynamoDBClient, BatchWriteItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+
+const parameterStoreNameForVendorsConfig = `/${process.env.STAGE}/vendor-leads/vendors-config`;
 
 /**
  * Lambda handler for processing leads from external vendors
@@ -45,16 +48,28 @@ async function saveToDynamoDB(messages) {
   const ddb = new DynamoDBClient({});
   const MAX_RETRIES = 3;
 
-  // Map of vendor names to lead ID property names
-  const vendorNameToLeadIdProperty = {
-    lendingtree: 'Internal_LeadID',
-    lendgo: 'universal_leadid',
-    testurl: 'id'
-  };
+  /**
+   * Fetches the vendor configuration from SSM Parameter Store
+   * Format should be like:
+   * {
+      "lendingtree": {
+        "leadIdProperty": "Internal_LeadID"
+      },
+      "lendgo": {
+        "leadIdProperty": "universal_leadid"
+      },
+      "testurl": {
+        "leadIdProperty": "id"
+      }
+    }
+   */
+  const vendorsConfig = await getVendorsConfig();
+
+  console.log('Vendors Config:', vendorsConfig);
 
   const putRequests = messages.map((message) => {
     // Get the vendor-specific ID property name or default to a fallback
-    const idPropertyName = vendorNameToLeadIdProperty[message.vendor.toLowerCase()];
+    const idPropertyName = vendorsConfig[message.vendor.toLowerCase()]?.leadIdProperty;
 
     // Get the ID value if it exists, or generate a unique fallback
     const leadId = idPropertyName ? message.lead[idPropertyName] : `${message.requestId}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
@@ -108,4 +123,26 @@ async function saveToDynamoDB(messages) {
   if (Object.keys(unprocessedItems).length > 0) {
     console.error(`Failed to process ${Object.values(unprocessedItems).flat().length} items after ${MAX_RETRIES} retries`);
   }
+}
+
+/**
+ * Fetches the vendor configuration from SSM Parameter Store
+ * @returns {Promise<Object>} The parsed vendor configuration object
+ */
+async function getVendorsConfig() {
+  try {
+    const command = new GetParameterCommand({
+      Name: parameterStoreNameForVendorsConfig,
+      WithDecryption: false
+    });
+    const response = await new SSMClient().send(command);
+    if (response.Parameter && response.Parameter.Value) {
+      return JSON.parse(response.Parameter.Value);
+    } else {
+      throw new Error(`Parameter ${parameterStoreNameForVendorsConfig} not found or has no value.`);
+    }
+  } catch (error) {
+    console.error(`Error fetching or parsing SSM parameter ${parameterStoreNameForVendorsConfig}:`, error);
+  }
+  return {};
 }
