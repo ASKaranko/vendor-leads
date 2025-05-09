@@ -8,11 +8,11 @@ const app = new App();
 // Create a stage for each environment
 new VendorLeadsStage(app, 'dev', {
   stage: 'dev',
-  env: { account: '108782052921', region: 'us-west-1' }
+  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }
 });
 
 // You can add more stages for other environments
 new VendorLeadsStage(app, 'prod', {
   stage: 'prod',
-  env: { account: '111111111111', region: 'us-west-1' }
+  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }
 });
