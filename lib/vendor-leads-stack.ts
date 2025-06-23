@@ -8,7 +8,10 @@ import {
   LogGroupLogDestination,
   AccessLogFormat,
   MethodLoggingLevel,
-  AuthorizationType
+  AuthorizationType,
+  LambdaIntegration,
+  ApiKey,
+  UsagePlan
 } from 'aws-cdk-lib/aws-apigateway';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Queue, QueueEncryption, RedrivePermission } from 'aws-cdk-lib/aws-sqs';
@@ -51,7 +54,7 @@ export class VendorLeadsStack extends Stack {
     const salesforceRestAPIPath = '/services/apexrest/vendor-api/v1/leads/';
     const salesforceOAuthPath = '/services/oauth2/token';
 
-    const secretStoreNameForExtClientAppCreds = `${stage}/salesforce/sf-ext-client-app-creds`;
+    const secretStoreNameForExtClientAppCreds = `${stage}/salesforce/sf-lead-store-app-creds`;
     const parameterStoreNameForVendorsConfig = `/${stage}/vendor-leads/vendors-config`;
 
     new CfnOutput(this, 'Stage', {
@@ -65,13 +68,13 @@ export class VendorLeadsStack extends Stack {
 
     const routerFnLogGroup = new LogGroup(this, 'PostRouterLogGroup', {
       logGroupName: `/aws/lambda/${stage}-vendor-leads-post-router`,
-      retention: RetentionDays.INFINITE,
+      retention: RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY
     });
 
     const ddbWriterFnLogGroup = new LogGroup(this, 'DDBWriterLogGroup', {
       logGroupName: `/aws/lambda/${stage}-vendor-leads-ddb-writer`,
-      retention: RetentionDays.INFINITE,
+      retention: RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY
     });
 
@@ -117,6 +120,21 @@ export class VendorLeadsStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY
     });
 
+    const apiKey = new ApiKey(this, 'VendorLeadsApiKey', {
+      apiKeyName: `${stage}-vendor-leads-api-key`,
+      description: 'API Key for Vendor Leads Service'
+    });
+
+    const usagePlan = new UsagePlan(this, 'VendorLeadsUsagePlan', {
+      name: `${stage}-vendor-leads-usage-plan`,
+      description: 'Usage plan for Vendor Leads API',
+      throttle: {
+        rateLimit: 100, // Lower than stage limit (100 < 200)
+        burstLimit: 200 // Lower than stage burst limit (200 < 300)
+      }
+      // No quota for unlimited monthly usage
+    });
+
     // Replace manual API Gateway with LambdaRestApi
     const api = new LambdaRestApi(this, 'VendorLeadsApi', {
       restApiName: `${stage}-vendor-leads-api`,
@@ -137,17 +155,42 @@ export class VendorLeadsStack extends Stack {
         loggingLevel: MethodLoggingLevel.ERROR
       },
       defaultMethodOptions: {
-        authorizationType: AuthorizationType.NONE
+        authorizationType: AuthorizationType.NONE,
+        apiKeyRequired: true
+      },
+      defaultCorsPreflightOptions: {
+        allowOrigins: ['*'],
+        allowMethods: ['POST'],
+        allowHeaders: ['*'],
+        allowCredentials: false
       }
+    });
+
+    usagePlan.addApiKey(apiKey);
+    usagePlan.addApiStage({
+      api,
+      stage: api.deploymentStage
     });
 
     // Add /leads resource with POST method
     const leadsResource = api.root.addResource('leads');
-    leadsResource.addMethod('POST');
+    leadsResource.addMethod(
+      'POST',
+      new LambdaIntegration(postRouterLambda, {
+        proxy: true, // Lambda handles the complete HTTP request/response
+        allowTestInvoke: true // Allows testing via API Gateway console
+      }),
+      { authorizationType: AuthorizationType.NONE, apiKeyRequired: true }
+    );
 
     new CfnOutput(this, 'ApiEndpoint', {
       value: api.url,
       description: 'The URL of the API Gateway endpoint'
+    });
+
+    new CfnOutput(this, 'ApiKeyValue', {
+      value: apiKey.keyId,
+      description: 'API Key ID for vendor integration'
     });
 
     const vendorLeadsDDBDeadLetterQueue = new Queue(this, 'VendorLeadsDDBDeadLetterQueue', {
