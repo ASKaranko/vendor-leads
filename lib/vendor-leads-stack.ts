@@ -120,21 +120,6 @@ export class VendorLeadsStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY
     });
 
-    const apiKey = new ApiKey(this, 'VendorLeadsApiKey', {
-      apiKeyName: `${stage}-vendor-leads-api-key`,
-      description: 'API Key for Vendor Leads Service'
-    });
-
-    const usagePlan = new UsagePlan(this, 'VendorLeadsUsagePlan', {
-      name: `${stage}-vendor-leads-usage-plan`,
-      description: 'Usage plan for Vendor Leads API',
-      throttle: {
-        rateLimit: 100, // Lower than stage limit (100 < 200)
-        burstLimit: 200 // Lower than stage burst limit (200 < 300)
-      }
-      // No quota for unlimited monthly usage
-    });
-
     // Replace manual API Gateway with LambdaRestApi
     const api = new LambdaRestApi(this, 'VendorLeadsApi', {
       restApiName: `${stage}-vendor-leads-api`,
@@ -155,42 +140,17 @@ export class VendorLeadsStack extends Stack {
         loggingLevel: MethodLoggingLevel.ERROR
       },
       defaultMethodOptions: {
-        authorizationType: AuthorizationType.NONE,
-        apiKeyRequired: true
-      },
-      defaultCorsPreflightOptions: {
-        allowOrigins: ['*'],
-        allowMethods: ['POST'],
-        allowHeaders: ['*'],
-        allowCredentials: false
+        authorizationType: AuthorizationType.NONE
       }
-    });
-
-    usagePlan.addApiKey(apiKey);
-    usagePlan.addApiStage({
-      api,
-      stage: api.deploymentStage
     });
 
     // Add /leads resource with POST method
     const leadsResource = api.root.addResource('leads');
-    leadsResource.addMethod(
-      'POST',
-      new LambdaIntegration(postRouterLambda, {
-        proxy: true, // Lambda handles the complete HTTP request/response
-        allowTestInvoke: true // Allows testing via API Gateway console
-      }),
-      { authorizationType: AuthorizationType.NONE, apiKeyRequired: true }
-    );
+    leadsResource.addMethod('POST');
 
     new CfnOutput(this, 'ApiEndpoint', {
       value: api.url,
       description: 'The URL of the API Gateway endpoint'
-    });
-
-    new CfnOutput(this, 'ApiKeyValue', {
-      value: apiKey.keyId,
-      description: 'API Key ID for vendor integration'
     });
 
     const vendorLeadsDDBDeadLetterQueue = new Queue(this, 'VendorLeadsDDBDeadLetterQueue', {
