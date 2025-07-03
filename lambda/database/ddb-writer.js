@@ -69,10 +69,23 @@ async function saveToDynamoDB(messages) {
 
   const putRequests = messages.map((message) => {
     // Get the vendor-specific ID property name or default to a fallback
-    const idPropertyName = vendorsConfig[message.vendor.toLowerCase()]?.leadIdProperty;
+    let idPropertyName = vendorsConfig[message.vendor.toLowerCase()]?.leadIdProperty;
 
-    // Get the ID value if it exists, or generate a unique fallback
-    const leadId = idPropertyName ? message.lead[idPropertyName] : `${message.requestId}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    let leadId;
+
+    if (idPropertyName) {
+      if (idPropertyName.includes('.')) {
+        // Traverse nested object properties
+        leadId = getNestedProperty(message.lead, idPropertyName);
+      } else {
+        // Simple property access
+        leadId = message.lead[idPropertyName];
+      }
+    }
+
+    if (!leadId) {
+      leadId = `${message.requestId}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    }
 
     return {
       PutRequest: {
@@ -145,4 +158,26 @@ async function getVendorsConfig() {
     console.error(`Error fetching or parsing SSM parameter ${parameterStoreNameForVendorsConfig}:`, error);
   }
   return {};
+}
+
+/**
+ * Helper function to get nested property value from an object using dot notation
+ * @param {Object} obj - The object to traverse
+ * @param {string} path - The dot-separated path (e.g., "user.profile.id")
+ * @returns {*} The value at the specified path, or undefined if not found
+ */
+function getNestedProperty(obj, path) {
+  if (!obj || !path) return undefined;
+
+  const keys = path.split('.');
+  let current = obj;
+
+  for (const key of keys) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return undefined;
+    }
+    current = current[key];
+  }
+
+  return current;
 }
