@@ -17,8 +17,12 @@ export const handler = async (event, context) => {
     }
   };
 
+  console.log('Event body:', JSON.stringify(event.body, null, 2));
+
   try {
     let vendor = getVendor(event);
+    console.log('Vendor:', vendor);
+    
     if (!vendor) {
       res.statusCode = BAD_REQUEST_CODE;
       res.body = JSON.stringify({ message: 'Vendor name cannot be empty.' });
