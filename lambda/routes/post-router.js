@@ -17,8 +17,6 @@ export const handler = async (event, context) => {
     }
   };
 
-  console.log('Event body:', JSON.stringify(event.body, null, 2));
-
   try {
     let vendor = getVendor(event);
     console.log('Vendor:', vendor);
@@ -179,6 +177,24 @@ function getLeadsData(event) {
     if (Object.keys(queryParamsWithoutVendor).length === 0) {
       return null;
     }
-    return JSON.stringify(queryParamsWithoutVendor);
+
+    console.log('Query parameters without vendor:', queryParamsWithoutVendor);
+    
+    // Decode URL-encoded query parameter values
+    const decodedParams = {};
+    for (const [key, value] of Object.entries(queryParamsWithoutVendor)) {
+      if (value !== null && value !== undefined) {
+        try {
+          decodedParams[decodeURIComponent(key)] = decodeURIComponent(value);
+        } catch (error) {
+          console.warn(`Failed to decode query parameter ${key}=${value}:`, error);
+          decodedParams[key] = value; // Use original value if decoding fails
+        }
+      } else {
+        decodedParams[key] = value;
+      }
+    }
+    
+    return JSON.stringify(decodedParams);
   }
 }
