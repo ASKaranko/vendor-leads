@@ -18,12 +18,11 @@ export const handler = async (event, context) => {
   };
 
   console.log('Received event:', JSON.stringify(event, null, 2));
-  
 
   try {
     let vendor = getVendor(event);
     console.log('Vendor:', vendor);
-    
+
     if (!vendor) {
       res.statusCode = BAD_REQUEST_CODE;
       res.body = JSON.stringify({ message: 'Vendor name cannot be empty.' });
@@ -172,19 +171,19 @@ function getVendor(event) {
 function getLeadsData(event) {
   if (event.body && event.body.length > 0) {
     const contentType = event.headers?.['Content-type'] || event.headers?.['content-type'] || event.headers?.['Content-Type'] || '';
-    
+
     if (contentType.includes('application/x-www-form-urlencoded')) {
       // Parse URL-encoded body data
       const bodyParams = decodeURLParamsInBody(event.body);
-      
+
       if (bodyParams.vendor) {
         delete bodyParams.vendor;
       }
-      
+
       if (Object.keys(bodyParams).length === 0) {
         return null;
       }
-      
+
       return JSON.stringify(bodyParams);
     } else {
       // Assume JSON body
@@ -228,12 +227,12 @@ function decodeKeyValuePair(key, value) {
  */
 function decodeURLParams(params) {
   const decodedParams = {};
-  
+
   for (const [key, value] of Object.entries(params)) {
     const [decodedKey, decodedValue] = decodeKeyValuePair(key, value);
     decodedParams[decodedKey] = decodedValue;
   }
-  
+
   return decodedParams;
 }
 
@@ -244,20 +243,21 @@ function decodeURLParams(params) {
  */
 function decodeURLParamsInBody(body) {
   const params = {};
-  
+
   if (!body || body.trim() === '') {
     return params;
   }
-  
+
   const pairs = body.split('&');
-  
+
   for (const pair of pairs) {
-    const [key, value = ''] = pair.split('=');
-    if (key) {
-      const [decodedKey, decodedValue] = decodeKeyValuePair(key, value);
-      params[decodedKey] = decodedValue;
+    const [key, value = null] = pair.split('=');
+    if (!value || !key) {
+      continue;
     }
+    const [decodedKey, decodedValue] = decodeKeyValuePair(key, value);
+    params[decodedKey] = decodedValue;
   }
-  
+
   return params;
 }
