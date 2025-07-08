@@ -251,8 +251,8 @@ function decodeURLParamsInBody(body) {
   const pairs = body.split('&');
 
   for (const pair of pairs) {
-    const [key, value] = pair.split('=');
-    if (!value || !key) {
+    const [key, value = null] = pair.split('=');
+    if (!key) {
       continue;
     }
     const [decodedKey, decodedValue] = decodeKeyValuePair(key, value);
