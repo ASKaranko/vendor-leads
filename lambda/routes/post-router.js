@@ -17,6 +17,9 @@ export const handler = async (event, context) => {
     }
   };
 
+  console.log('Received event:', JSON.stringify(event, null, 2));
+  
+
   try {
     let vendor = getVendor(event);
     console.log('Vendor:', vendor);
@@ -168,7 +171,25 @@ function getVendor(event) {
 
 function getLeadsData(event) {
   if (event.body && event.body.length > 0) {
-    return event.body;
+    const contentType = event.headers?.['content-type'] || event.headers?.['Content-Type'] || '';
+    
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      // Parse URL-encoded body data
+      const bodyParams = decodeURLParamsInBody(event.body);
+      
+      if (bodyParams.vendor) {
+        delete bodyParams.vendor;
+      }
+      
+      if (Object.keys(bodyParams).length === 0) {
+        return null;
+      }
+      
+      return JSON.stringify(bodyParams);
+    } else {
+      // Assume JSON body
+      return event.body;
+    }
   } else {
     const queryParamsWithoutVendor = { ...event.queryStringParameters };
     if (queryParamsWithoutVendor.vendor) {
@@ -179,22 +200,64 @@ function getLeadsData(event) {
     }
 
     console.log('Query parameters without vendor:', queryParamsWithoutVendor);
-    
-    // Decode URL-encoded query parameter values
-    const decodedParams = {};
-    for (const [key, value] of Object.entries(queryParamsWithoutVendor)) {
-      if (value !== null && value !== undefined) {
-        try {
-          decodedParams[decodeURIComponent(key)] = decodeURIComponent(value);
-        } catch (error) {
-          console.warn(`Failed to decode query parameter ${key}=${value}:`, error);
-          decodedParams[key] = value; // Use original value if decoding fails
-        }
-      } else {
-        decodedParams[key] = value;
-      }
-    }
-    
-    return JSON.stringify(decodedParams);
+    return JSON.stringify(decodeURLParams(queryParamsWithoutVendor));
   }
+}
+
+/**
+ * Shared helper function to decode URL-encoded key-value pairs
+ * @param {string} key - The key to decode
+ * @param {string} value - The value to decode
+ * @returns {Array} - [decodedKey, decodedValue]
+ */
+function decodeKeyValuePair(key, value) {
+  try {
+    const decodedKey = decodeURIComponent(key);
+    const decodedValue = value !== null && value !== undefined ? decodeURIComponent(value) : value;
+    return [decodedKey, decodedValue];
+  } catch (error) {
+    console.warn(`Failed to decode parameter ${key}=${value}:`, error);
+    return [key, value];
+  }
+}
+
+/**
+ * Helper function to decode URL-encoded parameters
+ * @param {Object} params - Object with potentially URL-encoded values
+ * @returns {Object} - Object with decoded values
+ */
+function decodeURLParams(params) {
+  const decodedParams = {};
+  
+  for (const [key, value] of Object.entries(params)) {
+    const [decodedKey, decodedValue] = decodeKeyValuePair(key, value);
+    decodedParams[decodedKey] = decodedValue;
+  }
+  
+  return decodedParams;
+}
+
+/**
+ * Parse URL-encoded body data (e.g., "key1=value1&key2=value2")
+ * @param {string} body - URL-encoded string
+ * @returns {Object} - Parsed and decoded parameters
+ */
+function decodeURLParamsInBody(body) {
+  const params = {};
+  
+  if (!body || body.trim() === '') {
+    return params;
+  }
+  
+  const pairs = body.split('&');
+  
+  for (const pair of pairs) {
+    const [key, value = ''] = pair.split('=');
+    if (key) {
+      const [decodedKey, decodedValue] = decodeKeyValuePair(key, value);
+      params[decodedKey] = decodedValue;
+    }
+  }
+  
+  return params;
 }
