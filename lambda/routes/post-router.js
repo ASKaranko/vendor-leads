@@ -171,7 +171,7 @@ function getVendor(event) {
 
 function getLeadsData(event) {
   if (event.body && event.body.length > 0) {
-    const contentType = event.headers?.['content-type'] || event.headers?.['Content-Type'] || '';
+    const contentType = event.headers?.['Content-type'] || event.headers?.['content-type'] || event.headers?.['Content-Type'] || '';
     
     if (contentType.includes('application/x-www-form-urlencoded')) {
       // Parse URL-encoded body data
