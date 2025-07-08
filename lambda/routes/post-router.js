@@ -255,7 +255,8 @@ function decodeURLParamsInBody(body) {
     if (!key) {
       continue;
     }
-    const [decodedKey, decodedValue] = decodeKeyValuePair(key, value);
+    const actualValue = value === null || value === '' ? null : value;
+    const [decodedKey, decodedValue] = decodeKeyValuePair(key, actualValue);
     params[decodedKey] = decodedValue;
   }
 
