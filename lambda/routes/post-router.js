@@ -211,8 +211,8 @@ function getLeadsData(event) {
  */
 function decodeKeyValuePair(key, value) {
   try {
-    const decodedKey = decodeURIComponent(key);
-    const decodedValue = value !== null && value !== undefined ? decodeURIComponent(value) : value;
+    const decodedKey = decodeFormValue(key);
+    const decodedValue = decodeFormValue(value);
     return [decodedKey, decodedValue];
   } catch (error) {
     console.warn(`Failed to decode parameter ${key}=${value}:`, error);
@@ -261,4 +261,9 @@ function decodeURLParamsInBody(body) {
   }
 
   return params;
+}
+
+function decodeFormValue(value) {
+  if (value === null || value === undefined) return value;
+  return decodeURIComponent(value.replace(/\+/g, '%20'));
 }
