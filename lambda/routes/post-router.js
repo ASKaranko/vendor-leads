@@ -172,6 +172,8 @@ function getLeadsData(event) {
   if (event.body && event.body.length > 0) {
     const contentType = event.headers?.['Content-type'] || event.headers?.['content-type'] || event.headers?.['Content-Type'] || '';
 
+    console.log('Content-Type:', contentType);
+    
     if (contentType.includes('application/x-www-form-urlencoded')) {
       // Parse URL-encoded body data
       const bodyParams = decodeURLParamsInBody(event.body);
@@ -255,6 +257,7 @@ function decodeURLParamsInBody(body) {
     if (!key) {
       continue;
     }
+    
     const actualValue = value === null || value === '' ? null : value;
     const [decodedKey, decodedValue] = decodeKeyValuePair(key, actualValue);
     params[decodedKey] = decodedValue;
@@ -265,5 +268,20 @@ function decodeURLParamsInBody(body) {
 
 function decodeFormValue(value) {
   if (value === null || value === undefined) return value;
-  return decodeURIComponent(value.replace(/\+/g, ' '));
+  
+  let decoded = value;
+  let previousDecoded = '';
+  
+  // Keep decoding until no more changes occur (handles multiple encoding levels)
+  while (decoded !== previousDecoded) {
+    previousDecoded = decoded;
+    try {
+      decoded = decodeURIComponent(decoded.replace(/\+/g, ' '));
+    } catch (error) {
+      console.warn(`Failed to decode value: ${decoded}`, error);
+      break;
+    }
+  }
+  
+  return decoded;
 }
