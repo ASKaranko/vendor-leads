@@ -265,5 +265,5 @@ function decodeURLParamsInBody(body) {
 
 function decodeFormValue(value) {
   if (value === null || value === undefined) return value;
-  return decodeURIComponent(value.replace(/\+/g, '%20'));
+  return decodeURIComponent(value.replace(/\+/g, ' '));
 }
