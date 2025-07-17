@@ -146,7 +146,29 @@ export class VendorLeadsStack extends Stack {
 
     // Add /leads resource with POST method
     const leadsResource = api.root.addResource('leads');
-    leadsResource.addMethod('POST');
+    leadsResource.addMethod(
+      'POST',
+      new LambdaIntegration(postRouterLambda, {
+        proxy: true,
+        allowTestInvoke: true
+      })
+    );
+
+    leadsResource.addMethod(
+      'PUT',
+      new LambdaIntegration(postRouterLambda, {
+        proxy: true,
+        allowTestInvoke: true
+      })
+    );
+
+    leadsResource.addMethod(
+      'PATCH',
+      new LambdaIntegration(postRouterLambda, {
+        proxy: true,
+        allowTestInvoke: true
+      })
+    );
 
     new CfnOutput(this, 'ApiEndpoint', {
       value: api.url,
