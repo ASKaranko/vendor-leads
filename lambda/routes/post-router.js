@@ -1,8 +1,12 @@
 import { SQSClient, SendMessageBatchCommand } from '@aws-sdk/client-sqs';
 import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
+import { createHttpResponse } from '../utils/vendors-response.js';
+import { getVendorsConfig } from '../utils/vendors-config.js';
+import { getVendorsLeadId } from '../utils/vendors-data.js';
 
-const BAD_REQUEST_CODE = 400;
-const INTERNAL_SERVER_ERROR_REQUEST_CODE = 500;
+const SUCCESS_RESPONSE_CODE = 200;
+const BAD_REQUEST_RESPONSE_CODE = 400;
+const INTERNAL_SERVER_ERROR_RESPONSE_CODE = 500;
 
 /**
  * Lambda handler for processing leads from external vendors
@@ -11,41 +15,44 @@ const INTERNAL_SERVER_ERROR_REQUEST_CODE = 500;
  * @returns
  */
 export const handler = async (event, context) => {
-  const res = {
-    headers: {
-      'Content-Type': 'application/json'
-    }
-  };
-
   console.log('Received event:', JSON.stringify(event, null, 2));
+  let response;
+  let vendor;
+  let leadId;
 
   try {
-    let vendor = getVendor(event);
-    console.log('Vendor:', vendor);
+    vendor = getVendor(event);
+    console.log('Vendor: ', vendor);
 
     if (!vendor) {
-      res.statusCode = BAD_REQUEST_CODE;
-      res.body = JSON.stringify({ message: 'Vendor name cannot be empty.' });
-      return res;
+      response = createHttpResponse(BAD_REQUEST_RESPONSE_CODE, 'unknown', { error: 'Vendor name cannot be empty.' }, false);
+      console.log('Response: ', response);
+      return response;
     }
     const leadsData = getLeadsData(event);
 
     if (leadsData === null) {
-      res.statusCode = BAD_REQUEST_CODE;
-      res.body = JSON.stringify({ message: 'Bad Request: No lead data provided in body or query parameters.' });
-      return res;
+      response = createHttpResponse(BAD_REQUEST_RESPONSE_CODE, vendor, { error: 'No lead data provided in body or query parameters.' }, false);
+      console.log('Response: ', response);
+      return response;
     }
 
+    leadId = await extractLeadIdFromNonArrayData(leadsData, vendor);
     await sendLeadsToSQS(context.awsRequestId, vendor, leadsData);
     await sendLeadsToEventBridge(vendor, leadsData);
-    res.statusCode = 200;
-    res.body = JSON.stringify({ message: 'Leads processed asynchronously.' });
+    response = createHttpResponse(SUCCESS_RESPONSE_CODE, vendor, { leadId }, true);
   } catch (error) {
     console.log('Error: ', error);
-    res.statusCode = INTERNAL_SERVER_ERROR_REQUEST_CODE;
-    res.body = JSON.stringify({ message: 'Failed to process leads request. Internal Server Error' });
+    response = createHttpResponse(
+      INTERNAL_SERVER_ERROR_RESPONSE_CODE,
+      vendor || 'unknown',
+      { errorMessage: error.message || 'Internal Server Error', leadId },
+      false
+    );
   }
-  return res;
+
+  console.log('Response: ', response);
+  return response;
 };
 
 /**
@@ -173,7 +180,7 @@ function getLeadsData(event) {
     const contentType = event.headers?.['Content-type'] || event.headers?.['content-type'] || event.headers?.['Content-Type'] || '';
 
     console.log('Content-Type:', contentType);
-    
+
     if (contentType.includes('application/x-www-form-urlencoded')) {
       // Parse URL-encoded body data
       const bodyParams = decodeURLParamsInBody(event.body);
@@ -257,7 +264,7 @@ function decodeURLParamsInBody(body) {
     if (!key) {
       continue;
     }
-    
+
     const actualValue = value === null || value === '' ? null : value;
     const [decodedKey, decodedValue] = decodeKeyValuePair(key, actualValue);
     params[decodedKey] = decodedValue;
@@ -268,10 +275,10 @@ function decodeURLParamsInBody(body) {
 
 function decodeFormValue(value) {
   if (value === null || value === undefined) return value;
-  
+
   let decoded = value;
   let previousDecoded = '';
-  
+
   // Keep decoding until no more changes occur (handles multiple encoding levels)
   while (decoded !== previousDecoded) {
     previousDecoded = decoded;
@@ -282,6 +289,28 @@ function decodeFormValue(value) {
       break;
     }
   }
-  
+
   return decoded;
+}
+
+/**
+ * Extracts the lead ID from non-array lead data
+ * @param {*} leadsData - The lead data which can be an JSON object or a string
+ * @param {*} vendorName - The name of the vendor
+ * @returns
+ */
+async function extractLeadIdFromNonArrayData(leadsData, vendorName) {
+  if (!leadsData) {
+    return null;
+  }
+
+  const parsedLeadsData = typeof leadsData === 'string' ? JSON.parse(leadsData) : leadsData;
+
+  if (typeof parsedLeadsData !== 'object' || Array.isArray(parsedLeadsData)) {
+    return null;
+  }
+
+  const vendorsConfig = await getVendorsConfig();
+
+  return getVendorsLeadId(parsedLeadsData, vendorsConfig, vendorName);
 }

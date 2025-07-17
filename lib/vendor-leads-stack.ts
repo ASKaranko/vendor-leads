@@ -9,9 +9,7 @@ import {
   AccessLogFormat,
   MethodLoggingLevel,
   AuthorizationType,
-  LambdaIntegration,
-  ApiKey,
-  UsagePlan
+  LambdaIntegration
 } from 'aws-cdk-lib/aws-apigateway';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Queue, QueueEncryption, RedrivePermission } from 'aws-cdk-lib/aws-sqs';
@@ -89,7 +87,8 @@ export class VendorLeadsStack extends Stack {
       environment: {
         SALESFORCE_EVENT_BUS_NAME: salesforceEventBusName,
         SALESFORCE_EVENT_BUS_RULE_SOURCE: salesforceEventRuleSource,
-        SALESFORCE_EVENT_BUS_RULE_DETAIL_TYPE: salesforceEventDetailType
+        SALESFORCE_EVENT_BUS_RULE_DETAIL_TYPE: salesforceEventDetailType,
+        STAGE: `${stage}`
       },
       logGroup: routerFnLogGroup
     });
@@ -220,6 +219,14 @@ export class VendorLeadsStack extends Stack {
 
     // Update Lambda environment variables to include the queue URL
     postRouterLambda.addEnvironment('LEADS_TO_DYNAMODB_SQS_URL', vendorLeadsDDBQueue.queueUrl);
+
+    // add Parameter Store access to postRouterLambda
+    postRouterLambda.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${parameterStoreNameForVendorsConfig}`]
+      })
+    );
 
     // If you want ddbWriterLambda to process messages from the queue
     ddbWriterLambda.addEventSource(

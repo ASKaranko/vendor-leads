@@ -1,8 +1,7 @@
 import { DynamoDBClient, BatchWriteItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-
-const parameterStoreNameForVendorsConfig = `/${process.env.STAGE}/vendor-leads/vendors-config`;
+import { getVendorsConfig } from '../utils/vendors-config.js';
+import { getVendorsLeadId } from '../utils/vendors-data.js';
 
 /**
  * Lambda handler for processing leads from external vendors
@@ -48,44 +47,10 @@ async function saveToDynamoDB(messages) {
   const ddb = new DynamoDBClient({});
   const MAX_RETRIES = 3;
 
-  /**
-   * Fetches the vendor configuration from SSM Parameter Store
-   * Format should be like:
-   * {
-      "lendingtree": {
-        "leadIdProperty": "Internal_LeadID"
-      },
-      "lendgo": {
-        "leadIdProperty": "universal_leadid"
-      },
-      "testurl": {
-        "leadIdProperty": "id"
-      }
-    }
-   */
   const vendorsConfig = await getVendorsConfig();
 
-  console.log('Vendors Config:', vendorsConfig);
-
   const putRequests = messages.map((message) => {
-    // Get the vendor-specific ID property name or default to a fallback
-    let idPropertyName = vendorsConfig[message.vendor.toLowerCase()]?.leadIdProperty;
-
-    let leadId;
-
-    if (idPropertyName) {
-      if (idPropertyName.includes('.')) {
-        // Traverse nested object properties
-        leadId = getNestedProperty(message.lead, idPropertyName);
-      } else {
-        // Simple property access
-        leadId = message.lead[idPropertyName];
-      }
-    }
-
-    if (!leadId) {
-      leadId = `${message.requestId}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    }
+    const leadId = getVendorsLeadId(message.lead, vendorsConfig, message.vendor);
 
     return {
       PutRequest: {
@@ -136,48 +101,4 @@ async function saveToDynamoDB(messages) {
   if (Object.keys(unprocessedItems).length > 0) {
     console.error(`Failed to process ${Object.values(unprocessedItems).flat().length} items after ${MAX_RETRIES} retries`);
   }
-}
-
-/**
- * Fetches the vendor configuration from SSM Parameter Store
- * @returns {Promise<Object>} The parsed vendor configuration object
- */
-async function getVendorsConfig() {
-  try {
-    const command = new GetParameterCommand({
-      Name: parameterStoreNameForVendorsConfig,
-      WithDecryption: false
-    });
-    const response = await new SSMClient().send(command);
-    if (response.Parameter && response.Parameter.Value) {
-      return JSON.parse(response.Parameter.Value);
-    } else {
-      throw new Error(`Parameter ${parameterStoreNameForVendorsConfig} not found or has no value.`);
-    }
-  } catch (error) {
-    console.error(`Error fetching or parsing SSM parameter ${parameterStoreNameForVendorsConfig}:`, error);
-  }
-  return {};
-}
-
-/**
- * Helper function to get nested property value from an object using dot notation
- * @param {Object} obj - The object to traverse
- * @param {string} path - The dot-separated path (e.g., "user.profile.id")
- * @returns {*} The value at the specified path, or undefined if not found
- */
-function getNestedProperty(obj, path) {
-  if (!obj || !path) return undefined;
-
-  const keys = path.split('.');
-  let current = obj;
-
-  for (const key of keys) {
-    if (current === null || current === undefined || typeof current !== 'object') {
-      return undefined;
-    }
-    current = current[key];
-  }
-
-  return current;
 }
