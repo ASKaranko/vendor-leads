@@ -169,6 +169,14 @@ export class VendorLeadsStack extends Stack {
       })
     );
 
+    leadsResource.addMethod(
+      'OPTIONS',
+      new LambdaIntegration(postRouterLambda, {
+        proxy: true,
+        allowTestInvoke: true
+      })
+    );
+
     new CfnOutput(this, 'ApiEndpoint', {
       value: api.url,
       description: 'The URL of the API Gateway endpoint'

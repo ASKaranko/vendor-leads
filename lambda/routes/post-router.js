@@ -20,6 +20,22 @@ export const handler = async (event, context) => {
   let vendor;
   let leadId;
 
+  const method = event.httpMethod;
+
+  // Handle OPTIONS preflight requests
+  if (method === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, PUT, PATCH, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, vendor',
+        'Access-Control-Max-Age': '86400' // 24 hours cache
+      },
+      body: JSON.stringify({ message: 'CORS preflight successful' })
+    };
+  }
+
   try {
     vendor = getVendor(event);
     console.log('Vendor: ', vendor);
