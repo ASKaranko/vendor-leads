@@ -137,21 +137,28 @@ export class VendorLeadsStack extends Stack {
         throttlingBurstLimit: 300,
         accessLogDestination: new LogGroupLogDestination(apiGatewayLogGroup),
         accessLogFormat: AccessLogFormat.jsonWithStandardFields(),
-        loggingLevel: MethodLoggingLevel.ERROR
+        loggingLevel: MethodLoggingLevel.INFO
       },
       defaultMethodOptions: {
         authorizationType: AuthorizationType.NONE
       },
       defaultCorsPreflightOptions: {
         allowOrigins: Cors.ALL_ORIGINS,
-        allowMethods: ['POST', 'OPTIONS'],
-        allowHeaders: ['Content-Type', 'vendor'],
+        allowMethods: ['POST', 'GET', 'OPTIONS'],
+        allowHeaders: ['Content-Type', 'vendor', 'Vendor', 'Authorization', 'X-Amz-Date', 'X-Api-Key', 'X-Amz-Security-Token'],
         maxAge: Duration.seconds(86400) // 24 hours
       }
     });
 
-    // Add /leads resource with POST method
-    const leadsResource = api.root.addResource('leads');
+    const leadsResource = api.root.addResource('leads', {
+      defaultCorsPreflightOptions: {
+        allowOrigins: ['*'],
+        allowMethods: ['POST', 'GET', 'OPTIONS'],
+        allowHeaders: ['Content-Type', 'vendor', 'Vendor', 'Authorization', 'X-Amz-Date', 'X-Api-Key', 'X-Amz-Security-Token'],
+        maxAge: Duration.seconds(86400)
+      }
+    });
+
     leadsResource.addMethod(
       'POST',
       new LambdaIntegration(postRouterLambda, {
