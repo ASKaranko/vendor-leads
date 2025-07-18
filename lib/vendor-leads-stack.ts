@@ -145,7 +145,7 @@ export class VendorLeadsStack extends Stack {
       defaultCorsPreflightOptions: {
         allowOrigins: Cors.ALL_ORIGINS,
         allowMethods: ['POST', 'GET', 'OPTIONS'],
-        allowHeaders: ['Content-Type', 'vendor', 'Vendor', 'Authorization', 'X-Amz-Date', 'X-Api-Key', 'X-Amz-Security-Token'],
+        allowHeaders: ['*'],
         maxAge: Duration.seconds(86400) // 24 hours
       }
     });
@@ -154,7 +154,7 @@ export class VendorLeadsStack extends Stack {
       defaultCorsPreflightOptions: {
         allowOrigins: ['*'],
         allowMethods: ['POST', 'GET', 'OPTIONS'],
-        allowHeaders: ['Content-Type', 'vendor', 'Vendor', 'Authorization', 'X-Amz-Date', 'X-Api-Key', 'X-Amz-Security-Token'],
+        allowHeaders: ['*'],
         maxAge: Duration.seconds(86400)
       }
     });

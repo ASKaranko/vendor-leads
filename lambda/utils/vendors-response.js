@@ -35,7 +35,7 @@ function createHttpResponse(statusCode, vendor, responseData, isSuccess = true) 
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, vendor, Vendor, Authorization, X-Amz-Date, X-Api-Key, X-Amz-Security-Token',
+      'Access-Control-Allow-Headers': '*',
     },
     body: JSON.stringify(vendorResponseBody)
   };
