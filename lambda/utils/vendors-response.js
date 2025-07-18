@@ -32,7 +32,10 @@ function createHttpResponse(statusCode, vendor, responseData, isSuccess = true) 
   return {
     statusCode,
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, vendor'
     },
     body: JSON.stringify(vendorResponseBody)
   };

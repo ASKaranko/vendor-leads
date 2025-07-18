@@ -9,7 +9,8 @@ import {
   AccessLogFormat,
   MethodLoggingLevel,
   AuthorizationType,
-  LambdaIntegration
+  LambdaIntegration,
+  Cors
 } from 'aws-cdk-lib/aws-apigateway';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Queue, QueueEncryption, RedrivePermission } from 'aws-cdk-lib/aws-sqs';
@@ -140,6 +141,12 @@ export class VendorLeadsStack extends Stack {
       },
       defaultMethodOptions: {
         authorizationType: AuthorizationType.NONE
+      },
+      defaultCorsPreflightOptions: {
+        allowOrigins: Cors.ALL_ORIGINS,
+        allowMethods: ['POST', 'OPTIONS'],
+        allowHeaders: ['Content-Type', 'vendor'],
+        maxAge: Duration.seconds(86400) // 24 hours
       }
     });
 
@@ -147,30 +154,6 @@ export class VendorLeadsStack extends Stack {
     const leadsResource = api.root.addResource('leads');
     leadsResource.addMethod(
       'POST',
-      new LambdaIntegration(postRouterLambda, {
-        proxy: true,
-        allowTestInvoke: true
-      })
-    );
-
-    leadsResource.addMethod(
-      'PUT',
-      new LambdaIntegration(postRouterLambda, {
-        proxy: true,
-        allowTestInvoke: true
-      })
-    );
-
-    leadsResource.addMethod(
-      'PATCH',
-      new LambdaIntegration(postRouterLambda, {
-        proxy: true,
-        allowTestInvoke: true
-      })
-    );
-
-    leadsResource.addMethod(
-      'OPTIONS',
       new LambdaIntegration(postRouterLambda, {
         proxy: true,
         allowTestInvoke: true
