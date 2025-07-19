@@ -10,7 +10,9 @@ import {
   MethodLoggingLevel,
   AuthorizationType,
   LambdaIntegration,
-  Cors
+  Cors,
+  MockIntegration,
+  PassthroughBehavior
 } from 'aws-cdk-lib/aws-apigateway';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Queue, QueueEncryption, RedrivePermission } from 'aws-cdk-lib/aws-sqs';
@@ -140,7 +142,8 @@ export class VendorLeadsStack extends Stack {
         loggingLevel: MethodLoggingLevel.INFO
       },
       defaultMethodOptions: {
-        authorizationType: AuthorizationType.NONE
+        authorizationType: AuthorizationType.NONE,
+        apiKeyRequired: false
       },
       defaultCorsPreflightOptions: {
         allowOrigins: Cors.ALL_ORIGINS,
@@ -165,6 +168,41 @@ export class VendorLeadsStack extends Stack {
         proxy: true,
         allowTestInvoke: true
       })
+    );
+
+    // Add GET method with MockIntegration
+    // Return a response without sending the request further to the backend
+    leadsResource.addMethod(
+      'GET',
+      new MockIntegration({
+        integrationResponses: [
+          {
+            statusCode: '200',
+            responseParameters: {
+              'method.response.header.Content-Type': "'application/json'",
+              'method.response.header.Access-Control-Allow-Origin': "'*'"
+            },
+            responseTemplates: {
+              'application/json': '{"message": "Please use POST method to send lead data"}'
+            }
+          }
+        ],
+        passthroughBehavior: PassthroughBehavior.NEVER,
+        requestTemplates: {
+          'application/json': '{"statusCode": 200}'
+        }
+      }),
+      {
+        methodResponses: [
+          {
+            statusCode: '200',
+            responseParameters: {
+              'method.response.header.Content-Type': true,
+              'method.response.header.Access-Control-Allow-Origin': true
+            }
+          }
+        ]
+      }
     );
 
     new CfnOutput(this, 'ApiEndpoint', {
