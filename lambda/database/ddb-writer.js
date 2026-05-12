@@ -50,7 +50,8 @@ async function saveToDynamoDB(messages) {
   const vendorsConfig = await getVendorsConfig();
 
   const putRequests = messages.map((message) => {
-    const leadId = getVendorsLeadId(message.lead, vendorsConfig, message.vendor);
+    const leadType = message.leadType || 'internet';
+    const leadId = getVendorsLeadId(message.lead, vendorsConfig, message.vendor, leadType);
 
     return {
       PutRequest: {
@@ -58,6 +59,7 @@ async function saveToDynamoDB(messages) {
           LeadId: { S: `Lead#${leadId}` },
           VendorName: { S: `Vendor#${message.vendor}` },
           Vendor: { S: message.vendor },
+          LeadType: { S: leadType },
           ReceivedAt: { S: new Date().toISOString() },
           Lead: { M: marshall(message.lead) }
         }

@@ -17,6 +17,10 @@
     ]
   },
   "context": {
+    "salesforceDomain": {
+      "dev": "https://emortgage--r2d2.sandbox.my.salesforce.com",
+      "prod": "https://emortgage.my.salesforce.com"
+    },
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/core:target-partitions": [

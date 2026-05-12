@@ -48,15 +48,27 @@ export class VendorLeadsStack extends Stack {
 
     const salesforceEventBusName = `${stage}-salesforce-event-bus`;
     const salesforceEventRuleSource = 'vendorleads.upsert';
-    const salesforceEventDetailType = 'LeadsReceived';
+    const salesforceLeadsDetailType = 'LeadsReceived.v1';
+    const salesforceLiveTransferDetailType = 'LiveTransferReceived.v1';
 
-    const sandboxDomain = 'https://emortgage--godspeed.sandbox.my.salesforce.com';
-    const productionDomain = 'https://emortgage.my.salesforce.com';
-    const salesforceRestAPIPath = '/services/apexrest/vendor-api/v1/leads/';
+    // Salesforce domain per stage is sourced from cdk.json context.
+    // To repoint at a new sandbox (e.g. after refresh), edit `cdk.json` →
+    // `context.salesforceDomain.<stage>` and redeploy. No code change needed.
+    const salesforceDomainConfig = this.node.tryGetContext('salesforceDomain') as Record<string, string> | undefined;
+    const endpointDomain = salesforceDomainConfig?.[stage];
+    if (!endpointDomain) {
+      throw new Error(
+        `Missing CDK context 'salesforceDomain.${stage}' in cdk.json. ` +
+        `Add the Salesforce domain for stage '${stage}' before deploying.`
+      );
+    }
+
+    const salesforceLeadsRestAPIPath = '/services/apexrest/vendor-api/v1/leads/';
+    const salesforceLiveTransfersRestAPIPath = '/services/apexrest/vendor-api/v1/live-transfers/';
     const salesforceOAuthPath = '/services/oauth2/token';
 
     const secretStoreNameForExtClientAppCreds = `${stage}/salesforce/sf-lead-store-app-creds`;
-    const parameterStoreNameForVendorsConfig = `/${stage}/vendor-leads/vendors-config`;
+    const vendorsConfigParameterPath = `/${stage}/vendor-leads/vendors`;
 
     new CfnOutput(this, 'Stage', {
       value: stage,
@@ -90,10 +102,31 @@ export class VendorLeadsStack extends Stack {
       environment: {
         SALESFORCE_EVENT_BUS_NAME: salesforceEventBusName,
         SALESFORCE_EVENT_BUS_RULE_SOURCE: salesforceEventRuleSource,
-        SALESFORCE_EVENT_BUS_RULE_DETAIL_TYPE: salesforceEventDetailType,
         STAGE: `${stage}`
       },
       logGroup: routerFnLogGroup
+    });
+
+    const liveTransferRouterFnLogGroup = new LogGroup(this, 'LiveTransferRouterLogGroup', {
+      logGroupName: `/aws/lambda/${stage}-live-transfer-router`,
+      retention: RetentionDays.ONE_MONTH,
+      removalPolicy: RemovalPolicy.DESTROY
+    });
+
+    const liveTransferRouterLambda = new NodejsFunction(this, 'LiveTransferRouter', {
+      functionName: `${stage}-live-transfer-router`,
+      runtime: Runtime.NODEJS_22_X,
+      architecture: Architecture.X86_64,
+      entry: path.join(__dirname, '../lambda/routes/live-transfer-router.js'),
+      handler: 'handler',
+      memorySize: 256,
+      timeout: Duration.seconds(10),
+      environment: {
+        SALESFORCE_EVENT_BUS_NAME: salesforceEventBusName,
+        SALESFORCE_EVENT_BUS_RULE_SOURCE: salesforceEventRuleSource,
+        STAGE: `${stage}`
+      },
+      logGroup: liveTransferRouterFnLogGroup
     });
 
     const ddbWriterLambda = new NodejsFunction(this, 'VendorLeadsDDBWriter', {
@@ -205,6 +238,32 @@ export class VendorLeadsStack extends Stack {
       }
     );
 
+    // Live-transfer endpoint: POST /v1/live-transfers
+    const v1Resource = api.root.addResource('v1', {
+      defaultCorsPreflightOptions: {
+        allowOrigins: ['*'],
+        allowMethods: ['POST', 'OPTIONS'],
+        allowHeaders: ['*'],
+        maxAge: Duration.seconds(86400)
+      }
+    });
+    const liveTransfersResource = v1Resource.addResource('live-transfers', {
+      defaultCorsPreflightOptions: {
+        allowOrigins: ['*'],
+        allowMethods: ['POST', 'OPTIONS'],
+        allowHeaders: ['*'],
+        maxAge: Duration.seconds(86400)
+      }
+    });
+
+    liveTransfersResource.addMethod(
+      'POST',
+      new LambdaIntegration(liveTransferRouterLambda, {
+        proxy: true,
+        allowTestInvoke: true
+      })
+    );
+
     new CfnOutput(this, 'ApiEndpoint', {
       value: api.url,
       description: 'The URL of the API Gateway endpoint'
@@ -242,27 +301,25 @@ export class VendorLeadsStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY
     });
 
-    // Grant the Lambda function permission to send messages to the queue
+    // Grant the Lambda functions permission to send/consume messages on the queue
     vendorLeadsDDBQueue.grantSendMessages(postRouterLambda);
+    vendorLeadsDDBQueue.grantSendMessages(liveTransferRouterLambda);
     vendorLeadsDDBQueue.grantConsumeMessages(ddbWriterLambda);
 
-    ddbWriterLambda.addToRolePolicy(
-      new PolicyStatement({
-        actions: ['ssm:GetParameter'],
-        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${parameterStoreNameForVendorsConfig}`]
-      })
-    );
+    // Per-vendor SSM parameters under /${stage}/vendor-leads/vendors/<name>.
+    // All three Lambdas read the path via GetParametersByPath; grant wildcard access.
+    const vendorsConfigSsmArn = `arn:aws:ssm:${this.region}:${this.account}:parameter${vendorsConfigParameterPath}/*`;
+    const ssmReadPolicy = new PolicyStatement({
+      actions: ['ssm:GetParametersByPath'],
+      resources: [vendorsConfigSsmArn]
+    });
+    postRouterLambda.addToRolePolicy(ssmReadPolicy);
+    liveTransferRouterLambda.addToRolePolicy(ssmReadPolicy);
+    ddbWriterLambda.addToRolePolicy(ssmReadPolicy);
 
     // Update Lambda environment variables to include the queue URL
     postRouterLambda.addEnvironment('LEADS_TO_DYNAMODB_SQS_URL', vendorLeadsDDBQueue.queueUrl);
-
-    // add Parameter Store access to postRouterLambda
-    postRouterLambda.addToRolePolicy(
-      new PolicyStatement({
-        actions: ['ssm:GetParameter'],
-        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${parameterStoreNameForVendorsConfig}`]
-      })
-    );
+    liveTransferRouterLambda.addEnvironment('LEADS_TO_DYNAMODB_SQS_URL', vendorLeadsDDBQueue.queueUrl);
 
     // If you want ddbWriterLambda to process messages from the queue
     ddbWriterLambda.addEventSource(
@@ -292,6 +349,7 @@ export class VendorLeadsStack extends Stack {
     eventBus.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
     eventBus.grantPutEventsTo(postRouterLambda);
+    eventBus.grantPutEventsTo(liveTransferRouterLambda);
 
     // Configure event bus archive with retention and AWS-owned encryption
     const archiveProps: ArchiveProps = {
@@ -308,8 +366,7 @@ export class VendorLeadsStack extends Stack {
     Tags.of(eventBus).add('Project', 'vendor-leads');
     Tags.of(eventBus).add('Environment', stage);
 
-    const endpointDomain = stage === 'prod' ? productionDomain : sandboxDomain;
-    // Connection with client-credentials OAuth
+    // Connection with client-credentials OAuth (endpointDomain comes from cdk.json context — see top of stack)
     const connection = new Connection(this, 'SalesforceConnection', {
       connectionName: `${stage}-salesforce-connection`,
       description: 'OAuth-client-credentials connection to Salesforce',
@@ -331,24 +388,25 @@ export class VendorLeadsStack extends Stack {
       })
     });
 
-    // API destination (HTTP endpoint)
+    // API destination for internet leads
     const dest = new EventsApiDestination(this, 'SalesforceVendorLeadsAPIDest', {
       apiDestinationName: `${stage}-salesforce-vendor-leads-api-destination`,
       description: 'API destination for Salesforce vendor leads',
       connection,
-      endpoint: `${endpointDomain}${salesforceRestAPIPath}`,
+      endpoint: `${endpointDomain}${salesforceLeadsRestAPIPath}`,
       httpMethod: HttpMethod.POST,
       rateLimitPerSecond: 10
     });
 
-    // Rule that sends matching events to the destination (using custom pattern)
+    // Rule that sends internet-lead events to the Salesforce destination.
+    // Detail path is `$.detail.data.leads` to match the metadata envelope shape.
     const salesforceRule = new Rule(this, 'VendorLeadsUpsertToSalesforce', {
       ruleName: `${stage}-vendor-leads-upsert-to-salesforce`,
       description: 'Rule to send vendor leads to Salesforce',
       eventBus,
       eventPattern: {
         source: [salesforceEventRuleSource],
-        detailType: [salesforceEventDetailType]
+        detailType: [salesforceLeadsDetailType]
       }
     });
     salesforceRule.applyRemovalPolicy(RemovalPolicy.DESTROY);
@@ -358,9 +416,41 @@ export class VendorLeadsStack extends Stack {
         maxEventAge: Duration.minutes(15),
         retryAttempts: 3,
         queryStringParameters: {
-          vendor: '$.detail.vendor'
+          vendor: '$.detail.data.vendor'
         },
-        event: RuleTargetInput.fromEventPath('$.detail.leads')
+        event: RuleTargetInput.fromEventPath('$.detail.data.leads')
+      })
+    );
+
+    // API destination for live-transfer leads — separate Salesforce REST endpoint, same OAuth connection
+    const liveTransferDest = new EventsApiDestination(this, 'SalesforceLiveTransfersAPIDest', {
+      apiDestinationName: `${stage}-salesforce-live-transfers-api-destination`,
+      description: 'API destination for Salesforce live-transfer leads',
+      connection,
+      endpoint: `${endpointDomain}${salesforceLiveTransfersRestAPIPath}`,
+      httpMethod: HttpMethod.POST,
+      rateLimitPerSecond: 10
+    });
+
+    const liveTransferRule = new Rule(this, 'LiveTransferUpsertToSalesforce', {
+      ruleName: `${stage}-live-transfer-upsert-to-salesforce`,
+      description: 'Rule to send live-transfer leads to Salesforce',
+      eventBus,
+      eventPattern: {
+        source: [salesforceEventRuleSource],
+        detailType: [salesforceLiveTransferDetailType]
+      }
+    });
+    liveTransferRule.applyRemovalPolicy(RemovalPolicy.DESTROY);
+    liveTransferRule.addTarget(
+      new TargetsApiDestination(liveTransferDest, {
+        deadLetterQueue: vendorLeadsEventDeadLetterQueue,
+        maxEventAge: Duration.minutes(15),
+        retryAttempts: 3,
+        queryStringParameters: {
+          vendor: '$.detail.data.vendor'
+        },
+        event: RuleTargetInput.fromEventPath('$.detail.data.leads')
       })
     );
 

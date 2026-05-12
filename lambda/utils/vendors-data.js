@@ -1,20 +1,20 @@
 import { getNestedProperty } from './object-utils.js';
+import { getVendorLeadConfig } from './vendors-config.js';
 
-function getVendorsLeadId(data, vendorsConfig, vendorName = null) {
+function getVendorsLeadId(data, vendorsConfig, vendorName = null, leadType = 'internet') {
   if (!data) {
     return generateUniqueLeadId(data);
   }
 
-  let idPropertyName = vendorsConfig[vendorName]?.leadIdProperty;
+  const vendorLeadConfig = getVendorLeadConfig(vendorsConfig, vendorName, leadType);
+  const idPropertyName = vendorLeadConfig?.leadIdProperty;
 
   let leadId;
 
   if (idPropertyName) {
     if (idPropertyName.includes('.')) {
-      // Traverse nested object properties
       leadId = getNestedProperty(data, idPropertyName);
     } else {
-      // Simple property access
       leadId = data[idPropertyName];
     }
   }

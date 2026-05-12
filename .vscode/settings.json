@@ -19,14 +19,6 @@
     "titleBar.inactiveForeground": "#e7e7e799"
   },
   "peacock.color": "#1857a4",
-  "cSpell.words": [
-    "apexrest",
-    "Creds",
-    "eventbridge",
-    "leadid",
-    "lendingtree",
-    "redrive",
-    "testurl",
-    "vendorleads"
-  ]
+  "cSpell.words": ["apexrest", "Creds", "eventbridge", "leadid", "lendingtree", "redrive", "testurl", "vendorleads"],
+  "specstory.cloudSync.enabled": "always"
 }
