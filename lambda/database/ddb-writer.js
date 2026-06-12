@@ -62,10 +62,14 @@ async function saveToDynamoDB(messages) {
       Lead: { M: marshall(message.lead) }
     };
 
-    // direct-leads carry an opaque destination code; persist it only when present
-    // (empty dst means "no destination" → attribute omitted, not stored as '').
-    if (message.dst) {
-      item.Dst = { S: message.dst };
+    // direct-leads carry opaque routing codes; persist only the non-empty ones so the
+    // table stays a faithful record of what was received (billing disputes outlive the
+    // 90-day EventBridge archive and 30-day router logs).
+    if (message.emcBranch) {
+      item.EmcBranch = { S: message.emcBranch };
+    }
+    if (message.emcUser) {
+      item.EmcUser = { S: message.emcUser };
     }
 
     return {

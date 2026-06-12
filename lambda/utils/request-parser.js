@@ -19,7 +19,7 @@ function getVendor(event) {
  * @param {string[]} [reservedKeys=['vendor']] - query/form keys that are routing
  *   metadata, not lead fields, and must be stripped before normalization.
  *   Defaults to ['vendor'] so internet-leads and live-transfers are unchanged;
- *   direct-leads passes ['vendor', 'dst'].
+ *   direct-leads passes ['vendor', 'emc_branch', 'emc_user'].
  */
 function getLeadsData(event, reservedKeys = ['vendor']) {
   if (event.body && event.body.length > 0) {

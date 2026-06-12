@@ -63,7 +63,7 @@ describe('direct-leads endpoint (additive)', () => {
     });
   });
 
-  test('rule target maps both vendor and dst to query string parameters', () => {
+  test('rule target maps vendor, emc_branch, and emc_user to query string parameters', () => {
     template.hasResourceProperties('AWS::Events::Rule', {
       Name: 'dev-direct-leads-upsert-to-salesforce',
       Targets: Match.arrayWith([
@@ -71,7 +71,8 @@ describe('direct-leads endpoint (additive)', () => {
           HttpParameters: {
             QueryStringParameters: {
               vendor: '$.detail.data.vendor',
-              dst: '$.detail.data.dst'
+              emc_branch: '$.detail.data.emcBranch',
+              emc_user: '$.detail.data.emcUser'
             }
           }
         })
@@ -88,7 +89,7 @@ describe('existing endpoints unaffected (regression)', () => {
     template.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'dev-live-transfer-router' });
   });
 
-  test('internet + live-transfer rule targets carry vendor only (no dst added)', () => {
+  test('internet + live-transfer rule targets carry vendor only (no routing params added)', () => {
     for (const ruleName of ['dev-vendor-leads-upsert-to-salesforce', 'dev-live-transfer-upsert-to-salesforce']) {
       template.hasResourceProperties('AWS::Events::Rule', {
         Name: ruleName,

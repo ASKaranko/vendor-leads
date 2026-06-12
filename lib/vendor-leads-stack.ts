@@ -530,7 +530,8 @@ export class VendorLeadsStack extends Stack {
         retryAttempts: 3,
         queryStringParameters: {
           vendor: '$.detail.data.vendor',
-          dst: '$.detail.data.dst'
+          emc_branch: '$.detail.data.emcBranch',
+          emc_user: '$.detail.data.emcUser'
         },
         event: RuleTargetInput.fromEventPath('$.detail.data.leads')
       })

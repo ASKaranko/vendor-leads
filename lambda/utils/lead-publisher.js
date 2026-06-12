@@ -27,11 +27,13 @@ function chunkArray(arr, size) {
  * @param {string} params.leadType - 'internet' | 'live_transfer' | 'direct_lead'
  * @param {string|object|Array<object>} params.leadsData
  * @param {string} params.queueUrl - SQS queue URL
- * @param {string} [params.dst] - opaque destination routing code (direct-leads only);
+ * @param {string} [params.emcBranch] - opaque branch routing code (direct-leads only);
+ *   omitted from the message body when undefined.
+ * @param {string} [params.emcUser] - opaque user routing code (direct-leads only);
  *   omitted from the message body when undefined.
  * @returns {Promise<void>}
  */
-async function sendLeadsToSQS({ correlationId, vendor, leadType, leadsData, queueUrl, dst }) {
+async function sendLeadsToSQS({ correlationId, vendor, leadType, leadsData, queueUrl, emcBranch, emcUser }) {
   const sqsClient = new SQSClient({});
   const leads = toLeadsArray(leadsData);
   const leadChunks = chunkArray(leads, MAX_BATCH);
@@ -45,7 +47,8 @@ async function sendLeadsToSQS({ correlationId, vendor, leadType, leadsData, queu
           correlationId,
           vendor,
           leadType,
-          ...(dst !== undefined ? { dst } : {}),
+          ...(emcBranch !== undefined ? { emcBranch } : {}),
+          ...(emcUser !== undefined ? { emcUser } : {}),
           lead
         })
       }));
@@ -83,11 +86,13 @@ async function sendLeadsToSQS({ correlationId, vendor, leadType, leadsData, queu
  * @param {string} params.eventSource
  * @param {string} params.detailType - e.g. 'LeadsReceived.v1'
  * @param {string} params.serviceName - emitter identifier for metadata.service
- * @param {string} [params.dst] - opaque destination routing code (direct-leads only);
- *   carried in detail.data so the rule target can map it to ?dst=. Omitted when undefined.
+ * @param {string} [params.emcBranch] - opaque branch routing code (direct-leads only);
+ *   carried in detail.data so the rule target can map it to ?emc_branch=. Omitted when undefined.
+ * @param {string} [params.emcUser] - opaque user routing code (direct-leads only);
+ *   carried in detail.data so the rule target can map it to ?emc_user=. Omitted when undefined.
  * @returns {Promise<void>}
  */
-async function sendLeadsToEventBridge({ correlationId, vendor, leadType, leadsData, eventBusName, eventSource, detailType, serviceName, dst }) {
+async function sendLeadsToEventBridge({ correlationId, vendor, leadType, leadsData, eventBusName, eventSource, detailType, serviceName, emcBranch, emcUser }) {
   const ebClient = new EventBridgeClient({});
   const leads = toLeadsArray(leadsData);
   const leadChunks = chunkArray(leads, MAX_BATCH);
@@ -97,7 +102,7 @@ async function sendLeadsToEventBridge({ correlationId, vendor, leadType, leadsDa
       console.log('EventBridge chunk size', chunk.length);
       console.log('EventBridge chunk', JSON.stringify(chunk, null, 2));
 
-      const detail = buildEventDetail({ correlationId, vendor, leadType, leads: chunk, serviceName, dst });
+      const detail = buildEventDetail({ correlationId, vendor, leadType, leads: chunk, serviceName, emcBranch, emcUser });
 
       const command = new PutEventsCommand({
         Entries: [
@@ -126,7 +131,7 @@ async function sendLeadsToEventBridge({ correlationId, vendor, leadType, leadsDa
   }
 }
 
-function buildEventDetail({ correlationId, vendor, leadType, leads, serviceName, dst }) {
+function buildEventDetail({ correlationId, vendor, leadType, leads, serviceName, emcBranch, emcUser }) {
   return {
     metadata: {
       id: randomUUID(),
@@ -138,7 +143,8 @@ function buildEventDetail({ correlationId, vendor, leadType, leads, serviceName,
     data: {
       vendor,
       leadType,
-      ...(dst !== undefined ? { dst } : {}),
+      ...(emcBranch !== undefined ? { emcBranch } : {}),
+      ...(emcUser !== undefined ? { emcUser } : {}),
       leads
     }
   };
