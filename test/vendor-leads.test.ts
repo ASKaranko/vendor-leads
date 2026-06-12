@@ -13,6 +13,13 @@ function synthMainTemplate(stage = 'dev'): Template {
       salesforceDomain: {
         dev: 'https://emortgage--r2d2.sandbox.my.salesforce.com',
         prod: 'https://emortgage.my.salesforce.com'
+      },
+      customDomain: {
+        prod: {
+          domainName: 'leads.emortgage-workflows.cloud',
+          hostedZoneId: 'Z00218281R78MEBTJOL7Q',
+          zoneName: 'emortgage-workflows.cloud'
+        }
       }
     }
   });
@@ -98,5 +105,42 @@ describe('existing endpoints unaffected (regression)', () => {
 
   test('three Salesforce API destinations total (internet, live-transfer, direct)', () => {
     template.resourceCountIs('AWS::Events::ApiDestination', 3);
+  });
+});
+
+describe('custom domain (context-guarded, prod only)', () => {
+  const prod = synthMainTemplate('prod');
+  const dev = synthMainTemplate('dev');
+
+  test('prod creates an ACM certificate for the custom domain', () => {
+    prod.hasResourceProperties('AWS::CertificateManager::Certificate', {
+      DomainName: 'leads.emortgage-workflows.cloud',
+      ValidationMethod: 'DNS'
+    });
+  });
+
+  test('prod creates a regional API Gateway custom domain', () => {
+    prod.hasResourceProperties('AWS::ApiGateway::DomainName', {
+      DomainName: 'leads.emortgage-workflows.cloud',
+      EndpointConfiguration: { Types: ['REGIONAL'] }
+    });
+  });
+
+  test('prod maps the whole API to the custom domain (empty base path)', () => {
+    prod.resourceCountIs('AWS::ApiGateway::BasePathMapping', 1);
+  });
+
+  test('prod creates the Route53 alias A record', () => {
+    prod.hasResourceProperties('AWS::Route53::RecordSet', {
+      Type: 'A',
+      Name: 'leads.emortgage-workflows.cloud.'
+    });
+  });
+
+  test('dev has NO custom-domain resources (stays on execute-api)', () => {
+    dev.resourceCountIs('AWS::CertificateManager::Certificate', 0);
+    dev.resourceCountIs('AWS::ApiGateway::DomainName', 0);
+    dev.resourceCountIs('AWS::ApiGateway::BasePathMapping', 0);
+    dev.resourceCountIs('AWS::Route53::RecordSet', 0);
   });
 });

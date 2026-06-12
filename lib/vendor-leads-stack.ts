@@ -12,7 +12,8 @@ import {
   LambdaIntegration,
   Cors,
   MockIntegration,
-  PassthroughBehavior
+  PassthroughBehavior,
+  SecurityPolicy
 } from 'aws-cdk-lib/aws-apigateway';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Queue, QueueEncryption, RedrivePermission } from 'aws-cdk-lib/aws-sqs';
@@ -33,6 +34,9 @@ import { ApiDestination as TargetsApiDestination, CloudWatchLogGroup as EventsCl
 import { TableV2 } from 'aws-cdk-lib/aws-dynamodb';
 import { SecretValue } from 'aws-cdk-lib';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { Certificate, CertificateValidation } from 'aws-cdk-lib/aws-certificatemanager';
+import { PublicHostedZone, ARecord, RecordTarget } from 'aws-cdk-lib/aws-route53';
+import { ApiGatewayDomain } from 'aws-cdk-lib/aws-route53-targets';
 
 interface VendorLeadsStackProps extends StackProps {
   stage: string;
@@ -548,5 +552,48 @@ export class VendorLeadsStack extends Stack {
         retryAttempts: 3
       })
     );
+
+    // Custom domain (additive, per-stage). Fronts the WHOLE API — /leads,
+    // /v1/live-transfers, /v1/direct-leads all resolve under the custom host.
+    // Guarded by cdk.json context: a stage without a `customDomain.<stage>` entry
+    // keeps using only the default execute-api URL (dev today). Static zone import
+    // (fromHostedZoneAttributes) — NOT fromLookup — so whole-app synth never needs
+    // cross-account credentials. The default execute-api endpoint stays enabled in
+    // parallel (disableExecuteApiEndpoint is never set).
+    const customDomainConfig = this.node.tryGetContext('customDomain') as
+      | Record<string, { domainName: string; hostedZoneId: string; zoneName: string }>
+      | undefined;
+    const customDomain = customDomainConfig?.[stage];
+
+    if (customDomain) {
+      const hostedZone = PublicHostedZone.fromHostedZoneAttributes(this, 'VendorLeadsHostedZone', {
+        hostedZoneId: customDomain.hostedZoneId,
+        zoneName: customDomain.zoneName
+      });
+
+      const certificate = new Certificate(this, 'VendorLeadsCustomDomainCert', {
+        domainName: customDomain.domainName,
+        validation: CertificateValidation.fromDns(hostedZone)
+      });
+
+      // Empty base path → maps the custom domain to the whole API stage (stage stripped).
+      const apiDomainName = api.addDomainName('VendorLeadsCustomDomain', {
+        domainName: customDomain.domainName,
+        certificate,
+        endpointType: EndpointType.REGIONAL,
+        securityPolicy: SecurityPolicy.TLS_1_2
+      });
+
+      new ARecord(this, 'VendorLeadsCustomDomainAliasRecord', {
+        zone: hostedZone,
+        recordName: customDomain.domainName,
+        target: RecordTarget.fromAlias(new ApiGatewayDomain(apiDomainName))
+      });
+
+      new CfnOutput(this, 'CustomDomainUrl', {
+        value: `https://${customDomain.domainName}/`,
+        description: 'Custom domain base URL (fronts the whole API; execute-api URL also stays active)'
+      });
+    }
   }
 }
