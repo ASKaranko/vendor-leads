@@ -24,12 +24,14 @@ function chunkArray(arr, size) {
  * @param {Object} params
  * @param {string} params.correlationId
  * @param {string} params.vendor
- * @param {string} params.leadType - 'internet' | 'live_transfer'
+ * @param {string} params.leadType - 'internet' | 'live_transfer' | 'direct_lead'
  * @param {string|object|Array<object>} params.leadsData
  * @param {string} params.queueUrl - SQS queue URL
+ * @param {string} [params.dst] - opaque destination routing code (direct-leads only);
+ *   omitted from the message body when undefined.
  * @returns {Promise<void>}
  */
-async function sendLeadsToSQS({ correlationId, vendor, leadType, leadsData, queueUrl }) {
+async function sendLeadsToSQS({ correlationId, vendor, leadType, leadsData, queueUrl, dst }) {
   const sqsClient = new SQSClient({});
   const leads = toLeadsArray(leadsData);
   const leadChunks = chunkArray(leads, MAX_BATCH);
@@ -43,6 +45,7 @@ async function sendLeadsToSQS({ correlationId, vendor, leadType, leadsData, queu
           correlationId,
           vendor,
           leadType,
+          ...(dst !== undefined ? { dst } : {}),
           lead
         })
       }));
@@ -74,24 +77,17 @@ async function sendLeadsToSQS({ correlationId, vendor, leadType, leadsData, queu
  * @param {Object} params
  * @param {string} params.correlationId
  * @param {string} params.vendor
- * @param {string} params.leadType - 'internet' | 'live_transfer'
+ * @param {string} params.leadType - 'internet' | 'live_transfer' | 'direct_lead'
  * @param {string|object|Array<object>} params.leadsData
  * @param {string} params.eventBusName
  * @param {string} params.eventSource
  * @param {string} params.detailType - e.g. 'LeadsReceived.v1'
  * @param {string} params.serviceName - emitter identifier for metadata.service
+ * @param {string} [params.dst] - opaque destination routing code (direct-leads only);
+ *   carried in detail.data so the rule target can map it to ?dst=. Omitted when undefined.
  * @returns {Promise<void>}
  */
-async function sendLeadsToEventBridge({
-  correlationId,
-  vendor,
-  leadType,
-  leadsData,
-  eventBusName,
-  eventSource,
-  detailType,
-  serviceName
-}) {
+async function sendLeadsToEventBridge({ correlationId, vendor, leadType, leadsData, eventBusName, eventSource, detailType, serviceName, dst }) {
   const ebClient = new EventBridgeClient({});
   const leads = toLeadsArray(leadsData);
   const leadChunks = chunkArray(leads, MAX_BATCH);
@@ -101,7 +97,7 @@ async function sendLeadsToEventBridge({
       console.log('EventBridge chunk size', chunk.length);
       console.log('EventBridge chunk', JSON.stringify(chunk, null, 2));
 
-      const detail = buildEventDetail({ correlationId, vendor, leadType, leads: chunk, serviceName });
+      const detail = buildEventDetail({ correlationId, vendor, leadType, leads: chunk, serviceName, dst });
 
       const command = new PutEventsCommand({
         Entries: [
@@ -130,7 +126,7 @@ async function sendLeadsToEventBridge({
   }
 }
 
-function buildEventDetail({ correlationId, vendor, leadType, leads, serviceName }) {
+function buildEventDetail({ correlationId, vendor, leadType, leads, serviceName, dst }) {
   return {
     metadata: {
       id: randomUUID(),
@@ -142,6 +138,7 @@ function buildEventDetail({ correlationId, vendor, leadType, leads, serviceName 
     data: {
       vendor,
       leadType,
+      ...(dst !== undefined ? { dst } : {}),
       leads
     }
   };

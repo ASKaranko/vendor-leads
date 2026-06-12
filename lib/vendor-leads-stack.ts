@@ -50,6 +50,7 @@ export class VendorLeadsStack extends Stack {
     const salesforceEventRuleSource = 'vendorleads.upsert';
     const salesforceLeadsDetailType = 'LeadsReceived.v1';
     const salesforceLiveTransferDetailType = 'LiveTransferReceived.v1';
+    const salesforceDirectLeadsDetailType = 'DirectLeadReceived.v1';
 
     // Salesforce domain per stage is sourced from cdk.json context.
     // To repoint at a new sandbox (e.g. after refresh), edit `cdk.json` →
@@ -58,13 +59,13 @@ export class VendorLeadsStack extends Stack {
     const endpointDomain = salesforceDomainConfig?.[stage];
     if (!endpointDomain) {
       throw new Error(
-        `Missing CDK context 'salesforceDomain.${stage}' in cdk.json. ` +
-        `Add the Salesforce domain for stage '${stage}' before deploying.`
+        `Missing CDK context 'salesforceDomain.${stage}' in cdk.json. ` + `Add the Salesforce domain for stage '${stage}' before deploying.`
       );
     }
 
     const salesforceLeadsRestAPIPath = '/services/apexrest/vendor-api/v1/leads/';
     const salesforceLiveTransfersRestAPIPath = '/services/apexrest/vendor-api/v1/live-transfers/';
+    const salesforceDirectLeadsRestAPIPath = '/services/apexrest/vendor-api/v1/direct-leads/';
     const salesforceOAuthPath = '/services/oauth2/token';
 
     const secretStoreNameForExtClientAppCreds = `${stage}/salesforce/sf-lead-store-app-creds`;
@@ -127,6 +128,28 @@ export class VendorLeadsStack extends Stack {
         STAGE: `${stage}`
       },
       logGroup: liveTransferRouterFnLogGroup
+    });
+
+    const directLeadsRouterFnLogGroup = new LogGroup(this, 'DirectLeadsRouterLogGroup', {
+      logGroupName: `/aws/lambda/${stage}-direct-leads-router`,
+      retention: RetentionDays.ONE_MONTH,
+      removalPolicy: RemovalPolicy.DESTROY
+    });
+
+    const directLeadsRouterLambda = new NodejsFunction(this, 'DirectLeadsRouter', {
+      functionName: `${stage}-direct-leads-router`,
+      runtime: Runtime.NODEJS_22_X,
+      architecture: Architecture.X86_64,
+      entry: path.join(__dirname, '../lambda/routes/direct-leads-router.js'),
+      handler: 'handler',
+      memorySize: 256,
+      timeout: Duration.seconds(10),
+      environment: {
+        SALESFORCE_EVENT_BUS_NAME: salesforceEventBusName,
+        SALESFORCE_EVENT_BUS_RULE_SOURCE: salesforceEventRuleSource,
+        STAGE: `${stage}`
+      },
+      logGroup: directLeadsRouterFnLogGroup
     });
 
     const ddbWriterLambda = new NodejsFunction(this, 'VendorLeadsDDBWriter', {
@@ -264,6 +287,24 @@ export class VendorLeadsStack extends Stack {
       })
     );
 
+    // Direct-leads endpoint: POST /v1/direct-leads
+    const directLeadsResource = v1Resource.addResource('direct-leads', {
+      defaultCorsPreflightOptions: {
+        allowOrigins: ['*'],
+        allowMethods: ['POST', 'OPTIONS'],
+        allowHeaders: ['*'],
+        maxAge: Duration.seconds(86400)
+      }
+    });
+
+    directLeadsResource.addMethod(
+      'POST',
+      new LambdaIntegration(directLeadsRouterLambda, {
+        proxy: true,
+        allowTestInvoke: true
+      })
+    );
+
     new CfnOutput(this, 'ApiEndpoint', {
       value: api.url,
       description: 'The URL of the API Gateway endpoint'
@@ -304,6 +345,7 @@ export class VendorLeadsStack extends Stack {
     // Grant the Lambda functions permission to send/consume messages on the queue
     vendorLeadsDDBQueue.grantSendMessages(postRouterLambda);
     vendorLeadsDDBQueue.grantSendMessages(liveTransferRouterLambda);
+    vendorLeadsDDBQueue.grantSendMessages(directLeadsRouterLambda);
     vendorLeadsDDBQueue.grantConsumeMessages(ddbWriterLambda);
 
     // Per-vendor SSM parameters under /${stage}/vendor-leads/vendors/<name>.
@@ -315,11 +357,13 @@ export class VendorLeadsStack extends Stack {
     });
     postRouterLambda.addToRolePolicy(ssmReadPolicy);
     liveTransferRouterLambda.addToRolePolicy(ssmReadPolicy);
+    directLeadsRouterLambda.addToRolePolicy(ssmReadPolicy);
     ddbWriterLambda.addToRolePolicy(ssmReadPolicy);
 
     // Update Lambda environment variables to include the queue URL
     postRouterLambda.addEnvironment('LEADS_TO_DYNAMODB_SQS_URL', vendorLeadsDDBQueue.queueUrl);
     liveTransferRouterLambda.addEnvironment('LEADS_TO_DYNAMODB_SQS_URL', vendorLeadsDDBQueue.queueUrl);
+    directLeadsRouterLambda.addEnvironment('LEADS_TO_DYNAMODB_SQS_URL', vendorLeadsDDBQueue.queueUrl);
 
     // If you want ddbWriterLambda to process messages from the queue
     ddbWriterLambda.addEventSource(
@@ -350,6 +394,7 @@ export class VendorLeadsStack extends Stack {
 
     eventBus.grantPutEventsTo(postRouterLambda);
     eventBus.grantPutEventsTo(liveTransferRouterLambda);
+    eventBus.grantPutEventsTo(directLeadsRouterLambda);
 
     // Configure event bus archive with retention and AWS-owned encryption
     const archiveProps: ArchiveProps = {
@@ -449,6 +494,39 @@ export class VendorLeadsStack extends Stack {
         retryAttempts: 3,
         queryStringParameters: {
           vendor: '$.detail.data.vendor'
+        },
+        event: RuleTargetInput.fromEventPath('$.detail.data.leads')
+      })
+    );
+
+    // API destination for direct leads — separate Salesforce REST endpoint, same OAuth connection
+    const directLeadsDest = new EventsApiDestination(this, 'SalesforceDirectLeadsAPIDest', {
+      apiDestinationName: `${stage}-salesforce-direct-leads-api-destination`,
+      description: 'API destination for Salesforce direct leads',
+      connection,
+      endpoint: `${endpointDomain}${salesforceDirectLeadsRestAPIPath}`,
+      httpMethod: HttpMethod.POST,
+      rateLimitPerSecond: 10
+    });
+
+    const directLeadsRule = new Rule(this, 'DirectLeadsUpsertToSalesforce', {
+      ruleName: `${stage}-direct-leads-upsert-to-salesforce`,
+      description: 'Rule to send direct leads to Salesforce',
+      eventBus,
+      eventPattern: {
+        source: [salesforceEventRuleSource],
+        detailType: [salesforceDirectLeadsDetailType]
+      }
+    });
+    directLeadsRule.applyRemovalPolicy(RemovalPolicy.DESTROY);
+    directLeadsRule.addTarget(
+      new TargetsApiDestination(directLeadsDest, {
+        deadLetterQueue: vendorLeadsEventDeadLetterQueue,
+        maxEventAge: Duration.minutes(15),
+        retryAttempts: 3,
+        queryStringParameters: {
+          vendor: '$.detail.data.vendor',
+          dst: '$.detail.data.dst'
         },
         event: RuleTargetInput.fromEventPath('$.detail.data.leads')
       })

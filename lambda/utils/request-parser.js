@@ -13,7 +13,15 @@ function getVendor(event) {
   }
 }
 
-function getLeadsData(event) {
+/**
+ * Parse the lead payload out of the request.
+ * @param {Object} event - API Gateway event
+ * @param {string[]} [reservedKeys=['vendor']] - query/form keys that are routing
+ *   metadata, not lead fields, and must be stripped before normalization.
+ *   Defaults to ['vendor'] so internet-leads and live-transfers are unchanged;
+ *   direct-leads passes ['vendor', 'dst'].
+ */
+function getLeadsData(event, reservedKeys = ['vendor']) {
   if (event.body && event.body.length > 0) {
     const contentType = event.headers?.['Content-type'] || event.headers?.['content-type'] || event.headers?.['Content-Type'] || '';
 
@@ -22,8 +30,8 @@ function getLeadsData(event) {
     if (contentType.includes('application/x-www-form-urlencoded')) {
       const bodyParams = decodeURLParamsInBody(event.body);
 
-      if (bodyParams.vendor) {
-        delete bodyParams.vendor;
+      for (const key of reservedKeys) {
+        delete bodyParams[key];
       }
 
       if (Object.keys(bodyParams).length === 0) {
@@ -35,16 +43,16 @@ function getLeadsData(event) {
       return event.body;
     }
   } else {
-    const queryParamsWithoutVendor = { ...event.queryStringParameters };
-    if (queryParamsWithoutVendor.vendor) {
-      delete queryParamsWithoutVendor.vendor;
+    const queryParams = { ...event.queryStringParameters };
+    for (const key of reservedKeys) {
+      delete queryParams[key];
     }
-    if (Object.keys(queryParamsWithoutVendor).length === 0) {
+    if (Object.keys(queryParams).length === 0) {
       return null;
     }
 
-    console.log('Query parameters without vendor:', queryParamsWithoutVendor);
-    return JSON.stringify(decodeURLParams(queryParamsWithoutVendor));
+    console.log('Query parameters without reserved keys:', queryParams);
+    return JSON.stringify(decodeURLParams(queryParams));
   }
 }
 

@@ -53,16 +53,24 @@ async function saveToDynamoDB(messages) {
     const leadType = message.leadType || 'internet';
     const leadId = getVendorsLeadId(message.lead, vendorsConfig, message.vendor, leadType);
 
+    const item = {
+      LeadId: { S: `Lead#${leadId}` },
+      VendorName: { S: `Vendor#${message.vendor}` },
+      Vendor: { S: message.vendor },
+      LeadType: { S: leadType },
+      ReceivedAt: { S: new Date().toISOString() },
+      Lead: { M: marshall(message.lead) }
+    };
+
+    // direct-leads carry an opaque destination code; persist it only when present
+    // (empty dst means "no destination" → attribute omitted, not stored as '').
+    if (message.dst) {
+      item.Dst = { S: message.dst };
+    }
+
     return {
       PutRequest: {
-        Item: {
-          LeadId: { S: `Lead#${leadId}` },
-          VendorName: { S: `Vendor#${message.vendor}` },
-          Vendor: { S: message.vendor },
-          LeadType: { S: leadType },
-          ReceivedAt: { S: new Date().toISOString() },
-          Lead: { M: marshall(message.lead) }
-        }
+        Item: item
       }
     };
   });
